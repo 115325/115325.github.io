@@ -359,6 +359,96 @@ function replaceBlockTag(root, newTag) {
   placeCaretAtEnd(replacement);
 }
 
+// Matches a URL token: http(s):// or bare www. addresses, stopping before
+// trailing punctuation that's obviously not part of the link (a period
+// ending a sentence, a closing paren around it, etc.) so "see example.com."
+// links just example.com, not example.com. with the period baked in.
+const URL_RE = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+function trimTrailingPunctuation(raw) {
+  const m = /[)\].,;:!?'"]+$/.exec(raw);
+  return m ? [raw.slice(0, -m[0].length), m[0]] : [raw, ""];
+}
+function makeLink(urlText) {
+  const a = document.createElement("a");
+  a.href = /^https?:\/\//i.test(urlText) ? urlText : `https://${urlText}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = urlText;
+  return a;
+}
+
+// Full-document sweep: used right after content is loaded or synced in from
+// someone else, so plain-text URLs that were typed before this feature
+// existed (or written elsewhere and pasted in) still end up clickable.
+function linkifyElement(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest("a") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const targets = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    URL_RE.lastIndex = 0;
+    if (URL_RE.test(node.textContent)) targets.push(node);
+  }
+  for (const textNode of targets) {
+    const text = textNode.textContent;
+    URL_RE.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    while ((m = URL_RE.exec(text))) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const [url, trailing] = trimTrailingPunctuation(m[0]);
+      if (url) frag.appendChild(makeLink(url));
+      if (trailing) frag.appendChild(document.createTextNode(trailing));
+      last = URL_RE.lastIndex;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    textNode.parentNode.replaceChild(frag, textNode);
+  }
+}
+
+// Live-typing check: fires on every keystroke but only actually does
+// anything the moment you finish a URL with a space or newline, converting
+// just that one word into a link and leaving the cursor exactly where it
+// was — much cheaper and less disruptive than re-scanning the whole
+// document (and re-parsing the whole doc would fight the browser's own
+// cursor handling while someone's mid-sentence).
+function linkifyBeforeCursor(root) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  const offset = range.startOffset;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  if (node.parentElement && node.parentElement.closest("a")) return;
+
+  const before = node.textContent.slice(0, offset);
+  const m = /(\S+)(\s)$/.exec(before);
+  if (!m) return;
+  const [url, trailingPunct] = trimTrailingPunctuation(m[1]);
+  URL_RE.lastIndex = 0;
+  if (!url || !URL_RE.test(url) || URL_RE.lastIndex !== url.length) return;
+
+  const tokenStart = offset - m[0].length;
+  const urlEnd = tokenStart + url.length;
+  const text = node.textContent;
+  const beforeNode = document.createTextNode(text.slice(0, tokenStart));
+  const link = makeLink(url);
+  const afterNode = document.createTextNode(text.slice(urlEnd));
+
+  const parent = node.parentNode;
+  parent.replaceChild(afterNode, node);
+  parent.insertBefore(link, afterNode);
+  parent.insertBefore(beforeNode, link);
+
+  const newRange = document.createRange();
+  const posInAfter = Math.max(0, Math.min(offset - urlEnd, afterNode.length));
+  newRange.setStart(afterNode, posInAfter);
+  newRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(newRange);
+}
+
 const TOOLBAR_ITEMS = [
   { cmd: "bold", icon: Bold, title: "Bold" },
   { cmd: "italic", icon: Italic, title: "Italic" },
@@ -409,7 +499,7 @@ function RichEditor({ theme, storageKey, label, icon: Icon, emptyHint, privateNo
       if (!live) return;
       lastHtmlRef.current = html;
       lastUpdatedAtRef.current = ts || 0;
-      if (elRef.current) elRef.current.innerHTML = html;
+      if (elRef.current) { elRef.current.innerHTML = html; linkifyElement(elRef.current); }
       setUpdatedAt(ts);
       refreshEmpty();
       setReady(true);
@@ -430,6 +520,7 @@ function RichEditor({ theme, storageKey, label, icon: Icon, emptyHint, privateNo
         lastUpdatedAtRef.current = remoteTs;
         lastHtmlRef.current = remoteHtml;
         elRef.current.innerHTML = remoteHtml;
+        linkifyElement(elRef.current);
         setUpdatedAt(remoteTs);
         refreshEmpty();
         setTimeout(() => setStatus("idle"), 600);
@@ -455,6 +546,46 @@ function RichEditor({ theme, storageKey, label, icon: Icon, emptyHint, privateNo
     refreshEmpty();
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(doSave, 700);
+  };
+
+  const handleInput = () => {
+    linkifyBeforeCursor(elRef.current);
+    scheduleSave();
+  };
+
+  // Pasted text keeps any URLs in it clickable too, rather than only
+  // linkifying URLs you type by hand.
+  const handlePaste = (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+    URL_RE.lastIndex = 0;
+    if (!text || !URL_RE.test(text)) return; // no URLs — let the default paste happen as normal
+    e.preventDefault();
+    URL_RE.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    while ((m = URL_RE.exec(text))) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const [url, trailing] = trimTrailingPunctuation(m[0]);
+      if (url) frag.appendChild(makeLink(url));
+      if (trailing) frag.appendChild(document.createTextNode(trailing));
+      last = URL_RE.lastIndex;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const lastChild = frag.lastChild;
+    range.insertNode(frag);
+    if (lastChild) {
+      const after = document.createRange();
+      after.setStartAfter(lastChild);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+    scheduleSave();
   };
 
   const exec = (cmd) => {
@@ -664,13 +795,14 @@ function RichEditor({ theme, storageKey, label, icon: Icon, emptyHint, privateNo
           ref={elRef}
           contentEditable={ready}
           suppressContentEditableWarning
-          onInput={scheduleSave}
+          onInput={handleInput}
+          onPaste={handlePaste}
           onFocus={() => setFocused(true)}
-          onBlur={() => { setFocused(false); doSave(); }}
+          onBlur={() => { setFocused(false); linkifyElement(elRef.current); doSave(); }}
           className="sm-doc"
           style={{
             minHeight: 90, fontSize: 12 * PT_TO_PX, lineHeight: 1.6, color: theme.text, outline: "none",
-            "--sm-quote": theme.gold, "--sm-code-bg": theme.surfaceAlt, "--sm-border": theme.border,
+            "--sm-quote": theme.gold, "--sm-code-bg": theme.surfaceAlt, "--sm-border": theme.border, "--sm-link": theme.accent,
           }}
         />
       </div>
@@ -730,7 +862,7 @@ function ResourceList({ theme, storageKey, user }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
         {items === null && <span style={{ fontSize: 13, color: theme.textMuted }}>Loading…</span>}
-        {items && items.length === 0 && <span style={{ fontSize: 13, color: theme.textMuted }}>No resources yet!</span>}
+        {items && items.length === 0 && <span style={{ fontSize: 13, color: theme.textMuted }}>No resources yet — add a link below.</span>}
         {items && items.map((r) => (
           <div key={r.id} style={{
             display: "flex", alignItems: "flex-start", gap: 10, border: `1px solid ${theme.border}`,
@@ -992,13 +1124,13 @@ function AuthScreen({ theme, onSignup, onSignin, error, busy }) {
         <p style={{ color: theme.textMuted, fontSize: 13.5, margin: "0 0 22px", lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 6 }}>
           <ShieldCheck size={15} style={{ flexShrink: 0, marginTop: 2 }} />
           {mode === "signup"
-            ? "Create an account. You'll stay signed in on this device."
-            : "Sign in to see your saved progress and to-do list. You'll stay signed in on this device afterwards."}
+            ? "Create an account — your password is salted and hashed before it's ever stored. You'll stay signed in on this device."
+            : "Sign in to see your progress. You'll stay signed in on this device."}
         </p>
 
         {mode === "signup" && (
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Display Name" style={inputStyle} />
+            placeholder="Display name (shown on the leaderboard)" style={inputStyle} />
         )}
         <input value={email} onChange={(e) => setEmail(e.target.value)} type="email"
           placeholder="Email" style={inputStyle} />
@@ -1711,7 +1843,7 @@ export default function StudyMapApp() {
         </div>
         {view === "notes" && (
           <RichEditor key={key} theme={theme} storageKey={key} icon={NotebookText} label="Collaborative notes"
-            emptyHint="No notes yet, get started!"
+            emptyHint="Nothing here yet. Start typing!"
             katexReady={katexReady} mathliveReady={mathliveReady} />
         )}
         {view === "resources" && <ResourceList key={resKey} theme={theme} storageKey={resKey} user={user} />}
@@ -1723,7 +1855,7 @@ export default function StudyMapApp() {
     const key = pnotesKey(type, id);
     return (
       <RichEditor key={key} theme={theme} storageKey={key} icon={StickyNote} label="Your private notes"
-        emptyHint="Nothing here yet — write anything, only you can see it."
+        emptyHint="Nothing here yet. Start typing!"
         privateNote
         katexReady={katexReady} mathliveReady={mathliveReady} />
     );
@@ -1990,6 +2122,7 @@ export default function StudyMapApp() {
         .sm-doc ul, .sm-doc ol { margin: 6px 0; padding-left: 20px; }
         .sm-doc blockquote { border-left: 3px solid var(--sm-quote, #999); margin: 8px 0; padding-left: 10px; font-style: italic; opacity: 0.85; }
         .sm-doc code { background: var(--sm-code-bg, rgba(127,127,127,.18)); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; font-family: ${FONT_MONO}; }
+        .sm-doc a { color: var(--sm-link, inherit); text-decoration: underline; text-underline-offset: 2px; }
         .sm-doc .sm-mathblock { margin: 10px 0; overflow-x: auto; }
         .sm-doc:empty:before { content: ""; }
       `}</style>
