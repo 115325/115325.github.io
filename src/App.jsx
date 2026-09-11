@@ -679,7 +679,7 @@ function RichEditor({ theme, storageKey, label, icon: Icon, emptyHint, privateNo
         {status !== "idle" && <RefreshCw size={11} className={status === "saving" ? "" : "animate-spin"} />}
         {status === "saving" ? "Saving…" : status === "syncing" ? "Syncing changes from someone else…" :
           updatedAt ? `Last updated ${new Date(updatedAt).toLocaleString()}` : "Not saved yet"}
-        {privateNote ? " · only visible to you" : " · everyone here can edit this"}
+        {privateNote ? " · only visible to you" : ""}
       </div>
     </div>
   );
@@ -730,7 +730,7 @@ function ResourceList({ theme, storageKey, user }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
         {items === null && <span style={{ fontSize: 13, color: theme.textMuted }}>Loading…</span>}
-        {items && items.length === 0 && <span style={{ fontSize: 13, color: theme.textMuted }}>No resources yet — add a link below.</span>}
+        {items && items.length === 0 && <span style={{ fontSize: 13, color: theme.textMuted }}>No resources yet!</span>}
         {items && items.map((r) => (
           <div key={r.id} style={{
             display: "flex", alignItems: "flex-start", gap: 10, border: `1px solid ${theme.border}`,
@@ -992,13 +992,13 @@ function AuthScreen({ theme, onSignup, onSignin, error, busy }) {
         <p style={{ color: theme.textMuted, fontSize: 13.5, margin: "0 0 22px", lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 6 }}>
           <ShieldCheck size={15} style={{ flexShrink: 0, marginTop: 2 }} />
           {mode === "signup"
-            ? "Create an account — your password is salted and hashed before it's ever stored. You'll stay signed in on this device."
+            ? "Create an account. You'll stay signed in on this device."
             : "Sign in to see your saved progress and to-do list. You'll stay signed in on this device afterwards."}
         </p>
 
         {mode === "signup" && (
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Display name (shown on the leaderboard)" style={inputStyle} />
+            placeholder="Display Name" style={inputStyle} />
         )}
         <input value={email} onChange={(e) => setEmail(e.target.value)} type="email"
           placeholder="Email" style={inputStyle} />
@@ -1711,7 +1711,7 @@ export default function StudyMapApp() {
         </div>
         {view === "notes" && (
           <RichEditor key={key} theme={theme} storageKey={key} icon={NotebookText} label="Collaborative notes"
-            emptyHint="No notes yet — start typing, everyone here will see it appear."
+            emptyHint="No notes yet, get started!"
             katexReady={katexReady} mathliveReady={mathliveReady} />
         )}
         {view === "resources" && <ResourceList key={resKey} theme={theme} storageKey={resKey} user={user} />}
@@ -1885,14 +1885,14 @@ export default function StudyMapApp() {
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <input value={customDraft} onChange={(e) => setCustomDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submitCustom()}
-            placeholder="Add your own task (not tied to any outcome)…"
+            placeholder="Add your own task…"
             style={{
               flex: 1, fontFamily: FONT_BODY, fontSize: 13, padding: "8px 10px", borderRadius: 6,
               border: `1px solid ${theme.border}`, background: theme.surfaceAlt, color: theme.text, outline: "none",
             }} />
           <Btn theme={theme} variant="solid" onClick={submitCustom}><Plus size={13} /> Add task</Btn>
         </div>
-        {todo.length === 0 && <EmptyHint theme={theme} text="Nothing scheduled yet — add outcomes or whole subtopics from the Map tab, or write your own task above." />}
+        {todo.length === 0 && <EmptyHint theme={theme} text="Nothing scheduled yet. Add outcomes or whole subtopics from the Map tab, or write your own task above." />}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {sorted.map((item) => {
             const { title, path } = label(item);
