@@ -3,7 +3,7 @@ import {
   Sun, Moon, LogOut, Plus, Trash2, ChevronRight,
   Trophy, Map as MapIcon, NotebookText, StickyNote, ListChecks, Check, X, Eye,
   EyeOff, User as UserIcon, Loader2, ShieldCheck, AlertCircle,
-  Bold, Italic, List, Quote, Code, Sigma, Heading2, RefreshCw, Link2, ExternalLink, Type, Pin
+  Bold, Italic, List, Quote, Code, Sigma, Heading2, RefreshCw, Link2, ExternalLink, Type, Pin, Pencil
 } from "lucide-react";
 
 /* ---------------------------------------------------------------- */
@@ -24,6 +24,15 @@ async function sSet(key, value, shared) {
     return true;
   } catch (e) {
     console.error("storage set failed", key, e);
+    return false;
+  }
+}
+async function sDelete(key, shared) {
+  try {
+    await window.storage.delete(key, shared);
+    return true;
+  } catch (e) {
+    console.error("storage delete failed", key, e);
     return false;
   }
 }
@@ -811,7 +820,7 @@ function RichEditor({ theme, storageKey, label, icon: Icon, emptyHint, privateNo
         {status !== "idle" && <RefreshCw size={11} className={status === "saving" ? "" : "animate-spin"} />}
         {status === "saving" ? "Saving…" : status === "syncing" ? "Syncing changes from someone else…" :
           updatedAt ? `Last updated ${new Date(updatedAt).toLocaleString()}` : "Not saved yet"}
-        {privateNote ? " · only visible to you" : ""}
+        {privateNote ? " · only visible to you" : " · everyone here can edit this"}
       </div>
     </div>
   );
@@ -1007,31 +1016,75 @@ function Breadcrumb({ theme, items, onJump }) {
 // and looks identical everywhere. `subjects` is expected to already be in
 // pinned-first order — this component just renders the strip and the pin
 // toggle, it doesn't do the sorting itself.
-function SubjectTabStrip({ theme, subjects, activeId, accent, onSelect, isPinned, onTogglePin }) {
+function SubjectTabStrip({ theme, subjects, activeId, accent, onSelect, isPinned, onTogglePin, onRename, onDelete }) {
   return (
     <>
-      {subjects.map((s) => {
-        const pinned = isPinned(s.id);
-        const active = activeId === s.id;
-        return (
-          <div key={s.id} onClick={() => onSelect(s.id)} style={{
-            display: "inline-flex", alignItems: "center", gap: 6, fontFamily: FONT_BODY, fontSize: 13.5,
-            fontWeight: 600, padding: "8px 8px 8px 16px", borderRadius: "8px 8px 0 0", cursor: "pointer",
-            border: `1px solid ${theme.border}`, borderBottom: active ? `3px solid ${accent}` : `1px solid ${theme.border}`,
-            background: active ? theme.surface : theme.surfaceAlt, color: active ? theme.text : theme.textMuted,
-          }}>
-            <span>{s.name}</span>
-            <button onClick={(e) => { e.stopPropagation(); onTogglePin(s.id); }} title={pinned ? "Unpin" : "Pin to top"}
-              style={{
-                background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center",
-                color: pinned ? theme.gold : theme.textMuted, opacity: pinned ? 1 : 0.4,
-              }}>
-              <Pin size={12} fill={pinned ? "currentColor" : "none"} />
-            </button>
-          </div>
-        );
-      })}
+      {subjects.map((s) => (
+        <SubjectTab key={s.id} theme={theme} subject={s} active={activeId === s.id} accent={accent}
+          onSelect={onSelect} pinned={isPinned(s.id)} onTogglePin={onTogglePin}
+          onRename={onRename} onDelete={onDelete} />
+      ))}
     </>
+  );
+}
+
+function SubjectTab({ theme, subject, active, accent, onSelect, pinned, onTogglePin, onRename, onDelete }) {
+  const [mode, setMode] = useState("view"); // view | rename | delete
+  const [draft, setDraft] = useState(subject.name);
+  const iconBtnStyle = {
+    background: "none", border: "none", cursor: "pointer", padding: 2,
+    display: "flex", alignItems: "center", color: theme.textMuted, opacity: 0.45,
+  };
+
+  if (mode === "rename") {
+    const commit = () => { if (draft.trim()) onRename(subject.id, draft.trim()); setMode("view"); };
+    return (
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px",
+        borderRadius: "8px 8px 0 0", border: `1.5px solid ${accent}`, background: theme.surfaceAlt,
+      }}>
+        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setMode("view"); }}
+          style={{
+            width: 130, fontFamily: FONT_BODY, fontSize: 13, padding: "4px 6px", borderRadius: 4,
+            border: `1px solid ${theme.border}`, background: theme.surface, color: theme.text, outline: "none",
+          }} />
+        <button onClick={commit} style={{ ...iconBtnStyle, opacity: 1, color: theme.accent }}><Check size={13} /></button>
+        <button onClick={() => setMode("view")} style={{ ...iconBtnStyle, opacity: 1 }}><X size={13} /></button>
+      </div>
+    );
+  }
+  if (mode === "delete") {
+    return (
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px",
+        borderRadius: "8px 8px 0 0", border: `1.5px solid ${theme.red}`, background: theme.redSoft,
+      }}>
+        <span style={{ fontSize: 12, color: theme.text }}>Delete "{subject.name}" and everything in it?</span>
+        <button onClick={() => onDelete(subject.id)} title="Confirm delete" style={{ ...iconBtnStyle, opacity: 1, color: theme.red }}><Check size={13} /></button>
+        <button onClick={() => setMode("view")} style={{ ...iconBtnStyle, opacity: 1 }}><X size={13} /></button>
+      </div>
+    );
+  }
+  return (
+    <div onClick={() => onSelect(subject.id)} style={{
+      display: "inline-flex", alignItems: "center", gap: 3, fontFamily: FONT_BODY, fontSize: 13.5,
+      fontWeight: 600, padding: "8px 6px 8px 16px", borderRadius: "8px 8px 0 0", cursor: "pointer",
+      border: `1px solid ${theme.border}`, borderBottom: active ? `3px solid ${accent}` : `1px solid ${theme.border}`,
+      background: active ? theme.surface : theme.surfaceAlt, color: active ? theme.text : theme.textMuted,
+    }}>
+      <span style={{ marginRight: 3 }}>{subject.name}</span>
+      <button onClick={(e) => { e.stopPropagation(); onTogglePin(subject.id); }} title={pinned ? "Unpin" : "Pin to top"}
+        style={{ ...iconBtnStyle, color: pinned ? theme.gold : theme.textMuted, opacity: pinned ? 1 : 0.4 }}>
+        <Pin size={12} fill={pinned ? "currentColor" : "none"} />
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setDraft(subject.name); setMode("rename"); }} title="Rename" style={iconBtnStyle}>
+        <Pencil size={11} />
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setMode("delete"); }} title="Delete" style={iconBtnStyle}>
+        <Trash2 size={11} />
+      </button>
+    </div>
   );
 }
 
@@ -1125,7 +1178,7 @@ function AuthScreen({ theme, onSignup, onSignin, error, busy }) {
           <ShieldCheck size={15} style={{ flexShrink: 0, marginTop: 2 }} />
           {mode === "signup"
             ? "Create an account — your password is salted and hashed before it's ever stored. You'll stay signed in on this device."
-            : "Sign in to see your progress. You'll stay signed in on this device."}
+            : "Sign in to see your saved progress and to-do list. You'll stay signed in on this device afterwards."}
         </p>
 
         {mode === "signup" && (
@@ -1431,6 +1484,81 @@ export default function StudyMapApp() {
   const resourcesKey = (type, id) => `resources:${type}:${id}`;
   const pnotesKey = (type, id) => `pnotes:${user.email}:${type}:${id}`;
 
+  /* ---- rename & delete (subjects/topics/subtopics) ----
+     Renaming only ever touches the `name` field — every id, and therefore
+     every reference to it (progress, schedule, notes, resources), stays
+     valid. Deleting cascades down the whole branch and also cleans up the
+     notes/resources documents that lived under whatever got removed, so
+     they don't just sit around in storage unreachable. Nothing needs to
+     reset the current Map/Notes/Personal navigation afterward — those all
+     look the deleted id up fresh on every render, so a stale id just
+     resolves to "not found" and the view falls back to its parent level
+     automatically (e.g. deleting the topic you're viewing just drops you
+     back to that subject's topic grid). */
+  const renameSubject = (subjectId, name) => saveTree((t) => ({ ...t, subjects: t.subjects.map((s) => (s.id === subjectId ? { ...s, name } : s)) }));
+  const renameTopic = (topicId, name) => saveTree((t) => ({ ...t, topics: t.topics.map((x) => (x.id === topicId ? { ...x, name } : x)) }));
+  const renameSubtopic = (subtopicId, name) => saveTree((t) => ({ ...t, subtopics: t.subtopics.map((x) => (x.id === subtopicId ? { ...x, name } : x)) }));
+  const renameNotesTopic = (notesTopicId, name) => {
+    const p = treeRef.current.notesTopics.find((x) => x.id === notesTopicId);
+    if (!p || p.createdBy !== user.email) return;
+    saveTree((t) => ({ ...t, notesTopics: t.notesTopics.map((x) => (x.id === notesTopicId ? { ...x, name } : x)) }));
+  };
+  const renameNotesSubtopic = (notesSubtopicId, name) => {
+    const p = treeRef.current.notesSubtopics.find((x) => x.id === notesSubtopicId);
+    if (!p || p.createdBy !== user.email) return;
+    saveTree((t) => ({ ...t, notesSubtopics: t.notesSubtopics.map((x) => (x.id === notesSubtopicId ? { ...x, name } : x)) }));
+  };
+
+  const cleanupNodeStorage = async (type, id) => {
+    await sDelete(notesKey(type, id), true);
+    await sDelete(resourcesKey(type, id), true);
+  };
+
+  const deleteSubtopic = async (subtopicId) => {
+    await saveTree((t) => ({
+      ...t,
+      subtopics: t.subtopics.filter((s) => s.id !== subtopicId),
+      outcomes: t.outcomes.filter((o) => o.subtopicId !== subtopicId),
+    }));
+    await cleanupNodeStorage("subtopic", subtopicId);
+  };
+
+  const deleteTopic = async (topicId) => {
+    const t = treeRef.current;
+    const subtopicIds = t.subtopics.filter((s) => s.topicId === topicId).map((s) => s.id);
+    const notesSubIds = t.notesSubtopics.filter((s) => s.topicId === topicId).map((s) => s.id);
+    await saveTree((tt) => ({
+      ...tt,
+      topics: tt.topics.filter((x) => x.id !== topicId),
+      subtopics: tt.subtopics.filter((s) => s.topicId !== topicId),
+      outcomes: tt.outcomes.filter((o) => !subtopicIds.includes(o.subtopicId)),
+      notesSubtopics: tt.notesSubtopics.filter((s) => s.topicId !== topicId),
+    }));
+    await cleanupNodeStorage("topic", topicId);
+    for (const id of [...subtopicIds, ...notesSubIds]) await cleanupNodeStorage("subtopic", id);
+  };
+
+  const deleteSubject = async (subjectId) => {
+    const t = treeRef.current;
+    const topicIds = t.topics.filter((x) => x.subjectId === subjectId).map((x) => x.id);
+    const notesTopicIds = t.notesTopics.filter((x) => x.subjectId === subjectId).map((x) => x.id);
+    const allTopicIds = [...topicIds, ...notesTopicIds];
+    const subtopicIds = t.subtopics.filter((s) => allTopicIds.includes(s.topicId)).map((s) => s.id);
+    const notesSubIds = t.notesSubtopics.filter((s) => allTopicIds.includes(s.topicId)).map((s) => s.id);
+    const allSubtopicIds = [...subtopicIds, ...notesSubIds];
+    await saveTree((tt) => ({
+      ...tt,
+      subjects: tt.subjects.filter((s) => s.id !== subjectId),
+      topics: tt.topics.filter((x) => x.subjectId !== subjectId),
+      notesTopics: tt.notesTopics.filter((x) => x.subjectId !== subjectId),
+      subtopics: tt.subtopics.filter((s) => !allTopicIds.includes(s.topicId)),
+      notesSubtopics: tt.notesSubtopics.filter((s) => !allTopicIds.includes(s.topicId)),
+      outcomes: tt.outcomes.filter((o) => !allSubtopicIds.includes(o.subtopicId)),
+    }));
+    for (const id of allTopicIds) await cleanupNodeStorage("topic", id);
+    for (const id of allSubtopicIds) await cleanupNodeStorage("subtopic", id);
+  };
+
   /* ---- leaderboard ---- */
   const loadLeaderboard = useCallback(async (scope) => {
     setLbData(null);
@@ -1498,7 +1626,8 @@ export default function StudyMapApp() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
           <SubjectTabStrip theme={theme} subjects={sortedSubjects()} activeId={subjectId} accent={theme.accent}
             onSelect={(id) => setMapPath({ subjectId: id, topicId: null, subtopicId: null })}
-            isPinned={isPinned} onTogglePin={togglePinSubject} />
+            isPinned={isPinned} onTogglePin={togglePinSubject}
+            onRename={renameSubject} onDelete={deleteSubject} />
           <div style={{ alignSelf: "center", marginLeft: 4 }}>
             <AddTile theme={theme} label="Add subject" onAdd={addSubject} />
           </div>
@@ -1515,6 +1644,8 @@ export default function StudyMapApp() {
                   sub={`${subtopicsOf(t.id).length} subtopic${subtopicsOf(t.id).length === 1 ? "" : "s"}`}
                   color={t.color}
                   onColorChange={(c) => setTopicColor(t.id, c)}
+                  onRename={(name) => renameTopic(t.id, name)}
+                  onDelete={() => deleteTopic(t.id)}
                   onClick={() => setMapPath({ subjectId: subject.id, topicId: t.id, subtopicId: null })} />
               ))}
               <AddTile theme={theme} label="Add topic" onAdd={(name) => addTopic(subject.id, name)} />
@@ -1536,6 +1667,8 @@ export default function StudyMapApp() {
                     sub={`${done}/${outs.length} confident`}
                     color={st.color}
                     onColorChange={(c) => setSubtopicColor(st.id, c)}
+                    onRename={(name) => renameSubtopic(st.id, name)}
+                    onDelete={() => deleteSubtopic(st.id)}
                     schedule={{
                       active: inSchedule,
                       title: inSchedule ? "Remove whole subtopic from schedule" : "Schedule whole subtopic",
@@ -1606,7 +1739,8 @@ export default function StudyMapApp() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
           <SubjectTabStrip theme={theme} subjects={sortedSubjects()} activeId={subjectId} accent={theme.gold}
             onSelect={(id) => setNotesPath({ subjectId: id, topicId: null, subtopicId: null, notesOnlyId: null, notesOnlySubtopicId: null })}
-            isPinned={isPinned} onTogglePin={togglePinSubject} />
+            isPinned={isPinned} onTogglePin={togglePinSubject}
+            onRename={renameSubject} onDelete={deleteSubject} />
         </div>
 
         {!subject && <EmptyHint theme={theme} text="Pick a subject to browse or add collaborative notes." />}
@@ -1621,6 +1755,8 @@ export default function StudyMapApp() {
                   sub={t._notesOnly ? "No map outcomes — notes only" : `${subtopicsOf(t.id).length} subtopic${subtopicsOf(t.id).length === 1 ? "" : "s"}`}
                   color={t.color}
                   onColorChange={(c) => (t._notesOnly ? setNotesTopicColor(t.id, c) : setTopicColor(t.id, c))}
+                  onRename={t._notesOnly ? (t.createdBy === user.email ? (name) => renameNotesTopic(t.id, name) : undefined) : (name) => renameTopic(t.id, name)}
+                  onDelete={t._notesOnly ? (t.createdBy === user.email ? () => removeNotesTopic(t.id) : undefined) : () => deleteTopic(t.id)}
                   onClick={() => (t._notesOnly
                     ? setNotesPath({ subjectId: subject.id, topicId: null, subtopicId: null, notesOnlyId: t.id, notesOnlySubtopicId: null })
                     : setNotesPath({ subjectId: subject.id, topicId: t.id, subtopicId: null, notesOnlyId: null, notesOnlySubtopicId: null }))} />
@@ -1648,6 +1784,8 @@ export default function StudyMapApp() {
                     sub="Notes only — parent topic isn't on the map"
                     color={st.color}
                     onColorChange={(c) => setSubtopicColor(st.id, c)}
+                    onRename={(name) => renameSubtopic(st.id, name)}
+                    onDelete={() => deleteSubtopic(st.id)}
                     onClick={() => setNotesPath({ subjectId: subject.id, topicId: null, subtopicId: st.id, notesOnlyId: notesOnlyItem.id, notesOnlySubtopicId: null })} />
                 ))}
                 <AddTile theme={theme} label="Add subtopic" onAdd={(name) => addSubtopic(notesOnlyItem.id, name)} />
@@ -1680,6 +1818,8 @@ export default function StudyMapApp() {
                     sub={st._notesOnly ? "No map outcomes — notes only" : `${outcomesOf(st.id).length} outcomes`}
                     color={st.color}
                     onColorChange={(c) => (st._notesOnly ? setNotesSubtopicColor(st.id, c) : setSubtopicColor(st.id, c))}
+                    onRename={st._notesOnly ? (st.createdBy === user.email ? (name) => renameNotesSubtopic(st.id, name) : undefined) : (name) => renameSubtopic(st.id, name)}
+                    onDelete={st._notesOnly ? (st.createdBy === user.email ? () => removeNotesSubtopic(st.id) : undefined) : () => deleteSubtopic(st.id)}
                     onClick={() => (st._notesOnly
                       ? setNotesPath({ subjectId: subject.id, topicId: topic.id, subtopicId: null, notesOnlyId: null, notesOnlySubtopicId: st.id })
                       : setNotesPath({ subjectId: subject.id, topicId: topic.id, subtopicId: st.id, notesOnlyId: null, notesOnlySubtopicId: null }))} />
@@ -1746,15 +1886,35 @@ export default function StudyMapApp() {
     const isCreator = item.createdBy === user.email;
     const promote = kind === "topic" ? promoteNotesTopic : promoteNotesSubtopic;
     const remove = kind === "topic" ? removeNotesTopic : removeNotesSubtopic;
+    const rename = kind === "topic" ? renameNotesTopic : renameNotesSubtopic;
+    const [renaming, setRenaming] = useState(false);
+    const [draft, setDraft] = useState(item.name);
+    const commitRename = () => { if (draft.trim()) rename(item.id, draft.trim()); setRenaming(false); };
     return (
       <div style={{ border: `1px dashed ${theme.gold}`, borderRadius: 10, padding: 16, background: theme.goldSoft }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <span style={{ fontFamily: FONT_HEAD, fontSize: 15.5, color: theme.text, flex: 1 }}>{item.name}</span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: theme.gold, background: theme.surface, borderRadius: 4, padding: "2px 6px" }}>Notes only</span>
-          {isCreator && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          {renaming ? (
             <>
-              <Btn theme={theme} variant="gold" onClick={() => promote(item.id)}><Check size={13} /> Add to map</Btn>
-              <Btn theme={theme} onClick={() => remove(item.id)} title="Remove"><Trash2 size={13} /></Btn>
+              <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenaming(false); }}
+                style={{
+                  flex: 1, minWidth: 140, fontFamily: FONT_BODY, fontSize: 14, padding: "6px 8px", borderRadius: 5,
+                  border: `1px solid ${theme.border}`, background: theme.surface, color: theme.text, outline: "none",
+                }} />
+              <Btn theme={theme} variant="solid" onClick={commitRename}><Check size={13} /></Btn>
+              <Btn theme={theme} onClick={() => setRenaming(false)}><X size={13} /></Btn>
+            </>
+          ) : (
+            <>
+              <span style={{ fontFamily: FONT_HEAD, fontSize: 15.5, color: theme.text, flex: 1 }}>{item.name}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: theme.gold, background: theme.surface, borderRadius: 4, padding: "2px 6px" }}>Notes only</span>
+              {isCreator && (
+                <>
+                  <Btn theme={theme} onClick={() => { setDraft(item.name); setRenaming(true); }} title="Rename"><Pencil size={13} /></Btn>
+                  <Btn theme={theme} variant="gold" onClick={() => promote(item.id)}><Check size={13} /> Add to map</Btn>
+                  <Btn theme={theme} onClick={() => remove(item.id)} title="Remove"><Trash2 size={13} /></Btn>
+                </>
+              )}
             </>
           )}
         </div>
@@ -1843,7 +2003,7 @@ export default function StudyMapApp() {
         </div>
         {view === "notes" && (
           <RichEditor key={key} theme={theme} storageKey={key} icon={NotebookText} label="Collaborative notes"
-            emptyHint="Nothing here yet. Start typing!"
+            emptyHint="No notes yet — start typing, everyone here will see it appear."
             katexReady={katexReady} mathliveReady={mathliveReady} />
         )}
         {view === "resources" && <ResourceList key={resKey} theme={theme} storageKey={resKey} user={user} />}
@@ -1855,7 +2015,7 @@ export default function StudyMapApp() {
     const key = pnotesKey(type, id);
     return (
       <RichEditor key={key} theme={theme} storageKey={key} icon={StickyNote} label="Your private notes"
-        emptyHint="Nothing here yet. Start typing!"
+        emptyHint="Nothing here yet — write anything, only you can see it."
         privateNote
         katexReady={katexReady} mathliveReady={mathliveReady} />
     );
@@ -1893,7 +2053,8 @@ export default function StudyMapApp() {
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
               <SubjectTabStrip theme={theme} subjects={sortedSubjects()} activeId={subjectId} accent={theme.accent}
                 onSelect={(id) => setPersonalPath({ subjectId: id, topicId: null, subtopicId: null })}
-                isPinned={isPinned} onTogglePin={togglePinSubject} />
+                isPinned={isPinned} onTogglePin={togglePinSubject}
+                onRename={renameSubject} onDelete={deleteSubject} />
             </div>
 
             {!subject && <EmptyHint theme={theme} text="Pick a subject to write private notes for its topics and subtopics." />}
@@ -1906,6 +2067,8 @@ export default function StudyMapApp() {
                     <GridCard key={t.id} theme={theme} title={t.name}
                       sub={`${subtopicsOf(t.id).length} subtopic${subtopicsOf(t.id).length === 1 ? "" : "s"}`}
                       color={t.color}
+                      onRename={(name) => renameTopic(t.id, name)}
+                      onDelete={() => deleteTopic(t.id)}
                       onClick={() => setPersonalPath({ subjectId: subject.id, topicId: t.id, subtopicId: null })} />
                   ))}
                 </Grid>
@@ -1924,6 +2087,8 @@ export default function StudyMapApp() {
                       <GridCard key={st.id} theme={theme} title={st.name}
                         sub={`${outcomesOf(st.id).length} outcomes`}
                         color={st.color}
+                        onRename={(name) => renameSubtopic(st.id, name)}
+                        onDelete={() => deleteSubtopic(st.id)}
                         onClick={() => setPersonalPath({ subjectId: subject.id, topicId: topic.id, subtopicId: st.id })} />
                     ))}
                   </Grid>
@@ -2017,14 +2182,14 @@ export default function StudyMapApp() {
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <input value={customDraft} onChange={(e) => setCustomDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submitCustom()}
-            placeholder="Add your own task…"
+            placeholder="Add your own task (not tied to any outcome)…"
             style={{
               flex: 1, fontFamily: FONT_BODY, fontSize: 13, padding: "8px 10px", borderRadius: 6,
               border: `1px solid ${theme.border}`, background: theme.surfaceAlt, color: theme.text, outline: "none",
             }} />
           <Btn theme={theme} variant="solid" onClick={submitCustom}><Plus size={13} /> Add task</Btn>
         </div>
-        {todo.length === 0 && <EmptyHint theme={theme} text="Nothing scheduled yet. Add outcomes or whole subtopics from the Map tab, or write your own task above." />}
+        {todo.length === 0 && <EmptyHint theme={theme} text="Nothing scheduled yet — add outcomes or whole subtopics from the Map tab, or write your own task above." />}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {sorted.map((item) => {
             const { title, path } = label(item);
@@ -2212,9 +2377,50 @@ function Grid({ children }) {
   );
 }
 
-function GridCard({ theme, title, sub, onClick, badge, color, onColorChange, schedule }) {
+function GridCard({ theme, title, sub, onClick, badge, color, onColorChange, schedule, onRename, onDelete }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(title);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const accent = color || theme.accent;
+
+  if (renaming) {
+    const commit = () => { if (renameDraft.trim()) onRename(renameDraft.trim()); setRenaming(false); };
+    return (
+      <div style={{
+        border: `1.5px solid ${accent}`, borderRadius: 8, padding: 12, minHeight: 64,
+        background: theme.surfaceAlt, display: "flex", flexDirection: "column", gap: 8,
+      }}>
+        <input autoFocus value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setRenaming(false); }}
+          style={{
+            fontFamily: FONT_BODY, fontSize: 13, padding: "6px 8px", borderRadius: 5,
+            border: `1px solid ${theme.border}`, background: theme.surface, color: theme.text, outline: "none",
+          }} />
+        <div style={{ display: "flex", gap: 6 }}>
+          <Btn theme={theme} variant="solid" onClick={commit}><Check size={13} /> Save</Btn>
+          <Btn theme={theme} onClick={() => setRenaming(false)}><X size={13} /></Btn>
+        </div>
+      </div>
+    );
+  }
+  if (confirmingDelete) {
+    return (
+      <div style={{
+        border: `1.5px solid ${theme.red}`, borderRadius: 8, padding: 12, minHeight: 64,
+        background: theme.redSoft, display: "flex", flexDirection: "column", gap: 8,
+      }}>
+        <span style={{ fontSize: 12.5, color: theme.text, lineHeight: 1.4 }}>
+          Delete <strong>"{title}"</strong>? This also removes everything inside it.
+        </span>
+        <div style={{ display: "flex", gap: 6 }}>
+          <Btn theme={theme} variant="danger" onClick={() => { onDelete(); setConfirmingDelete(false); }}><Trash2 size={13} /> Delete</Btn>
+          <Btn theme={theme} onClick={() => setConfirmingDelete(false)}>Cancel</Btn>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: "relative" }}>
       <button onClick={onClick} style={{
@@ -2233,6 +2439,29 @@ function GridCard({ theme, title, sub, onClick, badge, color, onColorChange, sch
         </div>
         <span style={{ fontSize: 12, color: theme.textMuted }}>{sub}</span>
       </button>
+
+      {(onRename || onDelete) && (
+        <div style={{ position: "absolute", top: 6, left: 6, display: "flex", gap: 1 }}>
+          {onRename && (
+            <button onClick={(e) => { e.stopPropagation(); setRenameDraft(title); setRenaming(true); }} title="Rename"
+              style={{
+                width: 18, height: 18, borderRadius: 4, border: "none", background: "transparent",
+                color: theme.textMuted, opacity: 0.55, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+              <Pencil size={11} />
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={(e) => { e.stopPropagation(); setConfirmingDelete(true); }} title="Delete"
+              style={{
+                width: 18, height: 18, borderRadius: 4, border: "none", background: "transparent",
+                color: theme.textMuted, opacity: 0.55, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+              <Trash2 size={11} />
+            </button>
+          )}
+        </div>
+      )}
 
       {schedule && (
         <button onClick={(e) => { e.stopPropagation(); schedule.onToggle(); }} title={schedule.title}
